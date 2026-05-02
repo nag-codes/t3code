@@ -2,7 +2,7 @@
 
 set -e
 
-REPO="ImNag/t3code"
+REPO="nag-codes/t3code"
 WORKFLOW="sync-upstream.yml"
 REF="main"
 
@@ -10,7 +10,7 @@ REF="main"
 # ~/.dotfiles/zsh/tools/gh.zsh hasn't exported it into this environment
 # (e.g. IntelliJ launched a non-interactive shell), fetch directly.
 if [[ -z "$GH_TOKEN" ]] && command -v op >/dev/null 2>&1; then
-  GH_TOKEN="$(op read 'op://Private/ImNag - GitHub PAT/credential' 2>/dev/null)"
+  GH_TOKEN="$(op read 'op://Private/GitHub - heyNag - Token/credential' 2>/dev/null)"
   export GH_TOKEN
 fi
 
