@@ -1,0 +1,72 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: "0 22 * * *" # Daily at 5:00 AM Bangkok time (UTC+7)
+  push:
+    branches: [main] # Catches "Update branch" UI clicks and direct local pushes.
+    # Note: pushes from inside this workflow use the default GITHUB_TOKEN and
+    # do NOT retrigger workflows — that's the anti-recursion guard.
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Sync upstream into main
+        run: |
+          git remote add upstream https://github.com/pingdotgg/t3code.git
+          git fetch upstream main
+          git merge upstream/main --no-edit
+          git push origin main
+
+      - name: Rebase feat/claude-bedrock-model-override onto new main
+        run: |
+          git fetch origin feat/claude-bedrock-model-override
+          git checkout -B feat/claude-bedrock-model-override \
+            origin/feat/claude-bedrock-model-override
+
+          if git rebase main; then
+            git push origin feat/claude-bedrock-model-override --force-with-lease
+            {
+              echo "## ✓ feat rebased cleanly onto main"
+              echo
+              echo "Both branches are now in sync with upstream."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            CONFLICTS=$(git diff --name-only --diff-filter=U | sed 's|^|- `|; s|$|`|')
+            git rebase --abort || true
+            {
+              echo "## ✗ feat needs manual rebase"
+              echo
+              echo "**main was synced successfully**, but rebasing feat onto"
+              echo "main produced conflicts. Resolve locally:"
+              echo
+              echo '```bash'
+              echo "git checkout feat/claude-bedrock-model-override"
+              echo "git pull --rebase=false   # refresh local feat from origin"
+              echo "git rebase main"
+              echo "# fix the files listed below, then:"
+              echo "git rebase --continue"
+              echo "git push origin feat/claude-bedrock-model-override --force-with-lease"
+              echo '```'
+              echo
+              echo "### Conflicting files"
+              echo "$CONFLICTS"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
