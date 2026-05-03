@@ -3,7 +3,7 @@
 set -e
 
 REPO="nag-codes/t3code"
-WORKFLOW="sync-upstream.yml"
+WORKFLOW="rebase-feat.yml"
 REF="main"
 
 if ! command -v gh >/dev/null 2>&1; then
@@ -28,8 +28,8 @@ echo "Triggering workflow '${WORKFLOW}' on ${REPO}@${REF}..."
 gh workflow run "${WORKFLOW}" --repo "${REPO}" --ref "${REF}"
 
 # Poll until the dispatched run registers (up to ~16s). Filter by
-# event=workflow_dispatch and createdAt to avoid grabbing a scheduled
-# or push-triggered run that happened to land first.
+# event=workflow_dispatch and createdAt to avoid grabbing a
+# push-triggered run that happened to land first.
 RUN_ID=""
 for _ in 1 2 3 4 5 6 7 8; do
   sleep 2

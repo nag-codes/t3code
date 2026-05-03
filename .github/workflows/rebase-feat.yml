@@ -1,25 +1,28 @@
-name: Sync Upstream
+name: Rebase feat onto main
 
+# Triggered by:
+#   - "Sync fork" button on github.com (pushes to main)
+#   - direct pushes to main
+#   - manual workflow_dispatch
+#
+# Note: pushes from inside this workflow use the default GITHUB_TOKEN and
+# do NOT retrigger workflows — that's the anti-recursion guard.
 on:
-  schedule:
-    - cron: "0 22 * * *" # Daily at 5:00 AM Bangkok time (UTC+7)
   push:
-    branches: [main] # Catches "Update branch" UI clicks and direct local pushes.
-    # Note: pushes from inside this workflow use the default GITHUB_TOKEN and
-    # do NOT retrigger workflows — that's the anti-recursion guard.
-  workflow_dispatch: # Allow manual trigger
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
-  sync:
+  rebase:
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
-      - name: Checkout
+      - name: Checkout feat branch
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: feat/claude-bedrock-model-override
           fetch-depth: 0
 
       - name: Configure git identity
@@ -27,20 +30,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Sync upstream into main
+      - name: Rebase feat/claude-bedrock-model-override onto main
         run: |
-          git remote add upstream https://github.com/pingdotgg/t3code.git
-          git fetch upstream main
-          git merge upstream/main --no-edit
-          git push origin main
+          git fetch origin main
 
-      - name: Rebase feat/claude-bedrock-model-override onto new main
-        run: |
-          git fetch origin feat/claude-bedrock-model-override
-          git checkout -B feat/claude-bedrock-model-override \
-            origin/feat/claude-bedrock-model-override
-
-          if git rebase main; then
+          if git rebase origin/main; then
             git push origin feat/claude-bedrock-model-override --force-with-lease
             {
               echo "## ✓ feat rebased cleanly onto main"
@@ -53,7 +47,7 @@ jobs:
             {
               echo "## ✗ feat needs manual rebase"
               echo
-              echo "**main was synced successfully**, but rebasing feat onto"
+              echo "main is current with upstream, but rebasing feat onto"
               echo "main produced conflicts. Resolve locally:"
               echo
               echo '```bash'
