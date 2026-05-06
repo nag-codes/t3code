@@ -80,6 +80,7 @@ import {
   ProviderRegistry,
   type ProviderRegistryShape,
 } from "./provider/Services/ProviderRegistry.ts";
+import { makeManualOnlyProviderMaintenanceCapabilities } from "./provider/providerMaintenance.ts";
 import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
@@ -517,6 +518,12 @@ const buildAppUnderTest = (options?: {
         Layer.mock(ProviderRegistry)({
           getProviders: Effect.succeed([]),
           refresh: () => Effect.succeed([]),
+          refreshInstance: () => Effect.succeed([]),
+          getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
+            Effect.succeed(
+              makeManualOnlyProviderMaintenanceCapabilities({ provider, packageName: null }),
+            ),
+          setProviderMaintenanceActionState: () => Effect.succeed([]),
           streamChanges: Stream.empty,
           ...options?.layers?.providerRegistry,
         }),
@@ -1904,6 +1911,42 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const wsUrl = yield* getWsServerUrl("/ws");
       const response = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverUpsertKeybinding](rule)),
+      );
+
+      assert.deepEqual(response.issues, []);
+      assert.deepEqual(response.keybindings, [resolved]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc server.removeKeybinding", () =>
+    Effect.gen(function* () {
+      const rule: KeybindingRule = {
+        command: "terminal.toggle",
+        key: "ctrl+k",
+      };
+      const resolved: ResolvedKeybindingRule = {
+        command: "terminal.toggle",
+        shortcut: {
+          key: "j",
+          metaKey: false,
+          ctrlKey: false,
+          shiftKey: false,
+          altKey: false,
+          modKey: true,
+        },
+      };
+
+      yield* buildAppUnderTest({
+        layers: {
+          keybindings: {
+            removeKeybindingRule: () => Effect.succeed([resolved]),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverRemoveKeybinding](rule)),
       );
 
       assert.deepEqual(response.issues, []);

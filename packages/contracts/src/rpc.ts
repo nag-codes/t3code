@@ -71,7 +71,11 @@ import {
 import {
   ServerConfigStreamEvent,
   ServerConfig,
+  ServerProviderUpdateError,
+  ServerProviderUpdateInput,
   ServerLifecycleStreamEvent,
+  ServerRemoveKeybindingInput,
+  ServerRemoveKeybindingResult,
   ServerProviderUpdatedPayload,
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
@@ -129,7 +133,9 @@ export const WS_METHODS = {
   // Server meta
   serverGetConfig: "server.getConfig",
   serverRefreshProviders: "server.refreshProviders",
+  serverUpdateProvider: "server.updateProvider",
   serverUpsertKeybinding: "server.upsertKeybinding",
+  serverRemoveKeybinding: "server.removeKeybinding",
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
   serverDiscoverSourceControl: "server.discoverSourceControl",
@@ -153,6 +159,12 @@ export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybi
   error: KeybindingsConfigError,
 });
 
+export const WsServerRemoveKeybindingRpc = Rpc.make(WS_METHODS.serverRemoveKeybinding, {
+  payload: ServerRemoveKeybindingInput,
+  success: ServerRemoveKeybindingResult,
+  error: KeybindingsConfigError,
+});
+
 export const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
   payload: Schema.Struct({}),
   success: ServerConfig,
@@ -170,6 +182,12 @@ export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProv
     instanceId: Schema.optional(ProviderInstanceId),
   }),
   success: ServerProviderUpdatedPayload,
+});
+
+export const WsServerUpdateProviderRpc = Rpc.make(WS_METHODS.serverUpdateProvider, {
+  payload: ServerProviderUpdateInput,
+  success: ServerProviderUpdatedPayload,
+  error: ServerProviderUpdateError,
 });
 
 export const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {
@@ -415,7 +433,9 @@ export const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess,
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
+  WsServerUpdateProviderRpc,
   WsServerUpsertKeybindingRpc,
+  WsServerRemoveKeybindingRpc,
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
   WsServerDiscoverSourceControlRpc,
