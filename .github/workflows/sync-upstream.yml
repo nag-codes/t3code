@@ -1,0 +1,73 @@
+name: Sync main from upstream
+
+# Schedules a daily sync of nag-codes/t3code:main from pingdotgg/t3code:main
+# at 05:00 Asia/Bangkok (= 22:00 UTC).
+#
+# Uses the GitHub "merge-upstream" REST API (same endpoint as the "Sync fork"
+# button) via `gh repo sync`. The API:
+#   - fast-forwards when possible,
+#   - creates a merge commit when fork main is only ahead of upstream/main,
+#   - returns 409 Conflict on real code conflicts.
+#
+# Pushes from this workflow are authored by the default GITHUB_TOKEN, so they
+# do NOT auto-retrigger other workflows on the push event (anti-recursion
+# guard). We therefore explicitly dispatch "Rebase feat onto main" afterward
+# so the feat branch stays current with the synced main.
+
+on:
+  schedule:
+    - cron: "0 22 * * *"   # 22:00 UTC = 05:00 ICT (Bangkok, UTC+7, no DST)
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write   # needed to dispatch rebase-feat.yml after sync
+
+    steps:
+      - name: Sync main with upstream/main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          output=$(gh repo sync nag-codes/t3code --branch main 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ]; then
+            {
+              echo "## ✓ Synced main from upstream"
+              echo
+              echo '```'
+              echo "$output"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## ✗ Sync failed — manual resolution required"
+              echo
+              echo '```'
+              echo "$output"
+              echo '```'
+              echo
+              echo "Resolve locally:"
+              echo
+              echo '```bash'
+              echo 'git fetch upstream'
+              echo 'git checkout main'
+              echo 'git merge upstream/main'
+              echo 'git push origin main'
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit "$status"
+          fi
+
+      - name: Trigger feat rebase
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run rebase-feat.yml --repo nag-codes/t3code --ref main
+          echo "Dispatched rebase-feat.yml — feat branch will be rebased onto the new main."
