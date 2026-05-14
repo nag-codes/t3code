@@ -102,10 +102,20 @@ node -e '
   const fs = require("fs");
   const p = "apps/desktop/package.json";
   const pkg = JSON.parse(fs.readFileSync(p, "utf8"));
-  pkg.dependencies = Object.fromEntries(
-    Object.entries(pkg.dependencies).filter(([, v]) => !String(v).startsWith("workspace:")),
-  );
+  const before = Object.entries(pkg.dependencies ?? {});
+  const after = before.filter(([, v]) => !String(v).startsWith("workspace:"));
+  const removed = before.length - after.length;
+  pkg.dependencies = Object.fromEntries(after);
   fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + "\n");
+  if (removed === 0) {
+    console.log("");
+    console.log("NOTE: No workspace:* deps found in " + p + ".");
+    console.log("      Upstream may have fixed the regression. Consider removing");
+    console.log("      this workaround block from .idea/build-mac-m1.sh.");
+    console.log("");
+  } else {
+    console.log("[workaround] Stripped " + removed + " workspace:* dep(s) from " + p + ".");
+  }
 '
 
 echo "Building Mac ARM64 (M1) DMG..."
