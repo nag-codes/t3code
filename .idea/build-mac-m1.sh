@@ -85,6 +85,29 @@ bun install
 echo "Cleaning ${RELEASE_DIR} folder..."
 rm -rf "${RELEASE_DIR}"
 
+# Workaround for upstream regression in f92e1e1b (PR #2676):
+# apps/desktop/package.json now declares @t3tools/* as workspace:* runtime
+# deps. scripts/build-desktop-artifact.ts copies them into a stage dir
+# outside the workspace, where `bun install` cannot resolve workspace:*.
+# tsdown's noExternal already inlines them into main.cjs, so dropping the
+# specs from the staged manifest is safe. Remove this block once upstream
+# fixes the build script (or moves the deps back to devDependencies).
+DESKTOP_PKG="apps/desktop/package.json"
+if ! git diff --quiet -- "${DESKTOP_PKG}"; then
+  echo "✗ ${DESKTOP_PKG} has uncommitted changes; aborting to avoid clobbering them." >&2
+  exit 1
+fi
+trap 'git checkout -- "${DESKTOP_PKG}" 2>/dev/null || true' EXIT
+node -e '
+  const fs = require("fs");
+  const p = "apps/desktop/package.json";
+  const pkg = JSON.parse(fs.readFileSync(p, "utf8"));
+  pkg.dependencies = Object.fromEntries(
+    Object.entries(pkg.dependencies).filter(([, v]) => !String(v).startsWith("workspace:")),
+  );
+  fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + "\n");
+'
+
 echo "Building Mac ARM64 (M1) DMG..."
 bun run dist:desktop:dmg:arm64
 
