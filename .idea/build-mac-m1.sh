@@ -85,45 +85,6 @@ bun install
 echo "Cleaning ${RELEASE_DIR} folder..."
 rm -rf "${RELEASE_DIR}"
 
-# ── UPSTREAM WORKAROUND START ─────────────────────────────────────────
-# Workaround for upstream regression in f92e1e1b (PR #2676):
-# apps/desktop/package.json now declares @t3tools/* as workspace:* runtime
-# deps. scripts/build-desktop-artifact.ts copies them into a stage dir
-# outside the workspace, where `bun install` cannot resolve workspace:*.
-# tsdown's noExternal already inlines them into main.cjs, so dropping the
-# specs from the staged manifest is safe.
-#
-# REMOVE EVERYTHING BETWEEN THE START AND END MARKERS once upstream fixes
-# the build script (or moves the deps back to devDependencies). The build
-# will print a "NOTE: ... Consider removing this workaround block" line
-# when the filter no longer matches anything — that's your signal.
-DESKTOP_PKG="apps/desktop/package.json"
-if ! git diff --quiet -- "${DESKTOP_PKG}"; then
-  echo "✗ ${DESKTOP_PKG} has uncommitted changes; aborting to avoid clobbering them." >&2
-  exit 1
-fi
-trap 'git checkout -- "${DESKTOP_PKG}" 2>/dev/null || true' EXIT
-node -e '
-  const fs = require("fs");
-  const p = "apps/desktop/package.json";
-  const pkg = JSON.parse(fs.readFileSync(p, "utf8"));
-  const before = Object.entries(pkg.dependencies ?? {});
-  const after = before.filter(([, v]) => !String(v).startsWith("workspace:"));
-  const removed = before.length - after.length;
-  pkg.dependencies = Object.fromEntries(after);
-  fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + "\n");
-  if (removed === 0) {
-    console.log("");
-    console.log("NOTE: No workspace:* deps found in " + p + ".");
-    console.log("      Upstream may have fixed the regression. Consider removing");
-    console.log("      this workaround block from .idea/build-mac-m1.sh.");
-    console.log("");
-  } else {
-    console.log("[workaround] Stripped " + removed + " workspace:* dep(s) from " + p + ".");
-  }
-'
-# ── UPSTREAM WORKAROUND END ───────────────────────────────────────────
-
 echo "Building Mac ARM64 (M1) DMG..."
 bun run dist:desktop:dmg:arm64
 
