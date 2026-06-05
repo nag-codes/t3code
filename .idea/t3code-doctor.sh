@@ -2,13 +2,15 @@
 
 # T3 Code environment doctor.
 # Verifies the toolchain expected by this repo:
-#   - Node / Bun versions pinned in .mise.toml and package.json engines
+#   - Node version pinned in .mise.toml and package.json engines
+#   - pnpm (the repo's package manager, declared via package.json "packageManager")
 #   - mise, git
 #   - Provider CLIs (codex, claude) and their auth status
 #   - Dependencies installed (node_modules)
-#   - Formatter, linter, and type-check health (bun fmt:check, bun lint, bun typecheck)
+#   - Formatter, linter, and type-check health (pnpm fmt:check, pnpm lint, pnpm typecheck)
 
 set -u
+set -o pipefail
 
 RUN_FULL=0
 for arg in "$@"; do
@@ -50,22 +52,33 @@ if command -v mise >/dev/null 2>&1; then
     else
       fail "mise install failed — see /tmp/t3code-doctor-mise-install.log"
     fi
+
+    # Use the mise-managed Node (per .mise.toml) for the rest of this run, so
+    # install + checks match upstream's pinned Node instead of whatever Node is
+    # first on PATH (e.g. a Homebrew install shadowing it in IntelliJ's shell).
+    if NODE_BIN=$(mise which node 2>/dev/null) && [[ -n "$NODE_BIN" ]]; then
+      export PATH="${NODE_BIN:h}:$PATH"
+    fi
   else
     warn "no .mise.toml at repo root"
   fi
 else
-  warn "mise not found (optional; used to pin Node/Bun) — install from https://mise.jdx.dev"
+  warn "mise not found (optional; used to pin Node) — install from https://mise.jdx.dev"
 fi
 
-if command -v bun >/dev/null 2>&1; then
-  info "running bun install …"
-  if bun install 2>&1 | tee /tmp/t3code-doctor-bun-install.log; then
-    ok "bun install complete"
+# This repo's package manager is pnpm (declared via package.json
+# "packageManager"); upstream's CI installs the same lockfile. --frozen-lockfile
+# reproduces it exactly and never rewrites pnpm-lock.yaml, so the Doctor can't
+# silently drift the lockfile away from upstream.
+if command -v pnpm >/dev/null 2>&1; then
+  info "running pnpm install --frozen-lockfile …"
+  if pnpm install --frozen-lockfile 2>&1 | tee /tmp/t3code-doctor-pnpm-install.log; then
+    ok "pnpm install complete"
   else
-    fail "bun install failed — see /tmp/t3code-doctor-bun-install.log"
+    fail "pnpm install failed — see /tmp/t3code-doctor-pnpm-install.log"
   fi
 else
-  fail "bun not found — install via mise or https://bun.sh"
+  fail "pnpm not found — enable it with 'corepack enable pnpm' (honors the packageManager field in package.json) or install via mise"
 fi
 
 hdr "Toolchain versions"
@@ -77,21 +90,27 @@ if command -v node >/dev/null 2>&1; then
     ok "node $NODE_V (expected v${EXPECTED_NODE_MAJOR}.x)"
   else
     warn "node $NODE_V (expected v${EXPECTED_NODE_MAJOR}.x per .mise.toml)"
+    print "         mise provides v${EXPECTED_NODE_MAJOR}.x; make sure this shell uses it (mise activate, or point IntelliJ at the mise shims)"
   fi
 else
   fail "node not found"
 fi
 
-EXPECTED_BUN_MAJOR="1.3"
-if command -v bun >/dev/null 2>&1; then
-  BUN_V=$(bun --version)
-  if [[ "$BUN_V" == ${EXPECTED_BUN_MAJOR}.* ]]; then
-    ok "bun $BUN_V (expected ${EXPECTED_BUN_MAJOR}.x)"
+# The repo declares its pnpm version via package.json "packageManager"
+# (e.g. "pnpm@10.24.0"). Compare against that field rather than hardcoding a
+# version, so this check automatically tracks whatever upstream pins.
+EXPECTED_PNPM=$(grep -oE 'pnpm@[0-9][0-9.]*' package.json 2>/dev/null | head -1 | cut -d'@' -f2)
+if command -v pnpm >/dev/null 2>&1; then
+  PNPM_V=$(pnpm --version)
+  if [[ -z "$EXPECTED_PNPM" ]]; then
+    ok "pnpm $PNPM_V"
+  elif [[ "$PNPM_V" == "$EXPECTED_PNPM" ]]; then
+    ok "pnpm $PNPM_V (matches packageManager pnpm@$EXPECTED_PNPM)"
   else
-    warn "bun $BUN_V (expected ${EXPECTED_BUN_MAJOR}.x per package.json engines)"
+    warn "pnpm $PNPM_V (package.json pins pnpm@$EXPECTED_PNPM — run 'corepack use pnpm@$EXPECTED_PNPM' to match)"
   fi
 else
-  fail "bun not found"
+  fail "pnpm not found"
 fi
 
 if command -v git >/dev/null 2>&1; then
@@ -171,7 +190,7 @@ hdr "Workspace"
 if [[ -d "node_modules" ]]; then
   ok "node_modules present (root)"
 else
-  fail "node_modules missing — run: bun install"
+  fail "node_modules missing — run: pnpm install"
 fi
 
 for pkg in apps/server apps/web apps/desktop packages/contracts packages/shared; do
@@ -183,25 +202,25 @@ for pkg in apps/server apps/web apps/desktop packages/contracts packages/shared;
 done
 
 if [[ $RUN_FULL -eq 1 ]]; then
-  hdr "Health checks (bun) — --full"
+  hdr "Health checks (pnpm) — --full"
 
   if [[ -d "node_modules" ]]; then
-    info "running bun fmt:check …"
-    if bun fmt:check >/tmp/t3code-doctor-fmt.log 2>&1; then
+    info "running pnpm fmt:check …"
+    if pnpm fmt:check >/tmp/t3code-doctor-fmt.log 2>&1; then
       ok "fmt clean"
     else
-      warn "fmt issues — see /tmp/t3code-doctor-fmt.log (fix: bun fmt)"
+      warn "fmt issues — see /tmp/t3code-doctor-fmt.log (fix: pnpm fmt)"
     fi
 
-    info "running bun lint …"
-    if bun lint >/tmp/t3code-doctor-lint.log 2>&1; then
+    info "running pnpm lint …"
+    if pnpm lint >/tmp/t3code-doctor-lint.log 2>&1; then
       ok "lint clean"
     else
       warn "lint issues — see /tmp/t3code-doctor-lint.log"
     fi
 
-    info "running bun typecheck …"
-    if bun typecheck >/tmp/t3code-doctor-tsc.log 2>&1; then
+    info "running pnpm typecheck …"
+    if pnpm typecheck >/tmp/t3code-doctor-tsc.log 2>&1; then
       ok "typecheck clean"
     else
       fail "typecheck failed — see /tmp/t3code-doctor-tsc.log"

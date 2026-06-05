@@ -80,13 +80,13 @@ fi
 # ── Build ─────────────────────────────────────────────────────────────
 echo
 echo "Installing dependencies..."
-bun install
+pnpm install --frozen-lockfile
 
 echo "Cleaning ${RELEASE_DIR} folder..."
 rm -rf "${RELEASE_DIR}"
 
 echo "Building Mac ARM64 (M1) DMG..."
-bun run dist:desktop:dmg:arm64
+pnpm run dist:desktop:dmg:arm64
 
 echo "Build complete. Artifacts in ${RELEASE_DIR}/"
 
