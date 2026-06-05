@@ -24,6 +24,7 @@ import * as path from "node:path";
  * minor-versioned, and fully pinned). We do not normalize.
  */
 const AWS_BEDROCK_MODEL_MAP: Record<string, string> = {
+  "claude-opus-4-8": "global.anthropic.claude-opus-4-8",
   "claude-opus-4-7": "global.anthropic.claude-opus-4-7",
   "claude-opus-4-6": "global.anthropic.claude-opus-4-6-v1",
   "claude-sonnet-4-6": "global.anthropic.claude-sonnet-4-6",
