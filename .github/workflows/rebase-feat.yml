@@ -2,6 +2,7 @@ name: Rebase feat onto main
 
 # Triggered by:
 #   - "Sync fork" button on github.com (pushes to main)
+#   - scheduled sync-upstream.yml runs (its SYNC_TOKEN PAT pushes to main)
 #   - direct pushes to main
 #   - manual workflow_dispatch
 #

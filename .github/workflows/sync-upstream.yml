@@ -9,10 +9,11 @@ name: Sync main from upstream
 #   - creates a merge commit when fork main is only ahead of upstream/main,
 #   - returns 409 Conflict on real code conflicts.
 #
-# Pushes from this workflow are authored by the default GITHUB_TOKEN, so they
-# do NOT auto-retrigger other workflows on the push event (anti-recursion
-# guard). We therefore explicitly dispatch "Rebase feat onto main" afterward
-# so the feat branch stays current with the synced main.
+# Auth uses the SYNC_TOKEN secret — a fine-grained PAT with Contents and
+# Workflows read/write on this repo — because the default GITHUB_TOKEN is
+# blocked from merging upstream commits that touch .github/workflows/.
+# PAT-authored pushes DO trigger push-event workflows, so "Rebase feat onto
+# main" fires on its own whenever the sync moves main — no explicit dispatch.
 
 on:
   schedule:
@@ -23,14 +24,28 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      actions: write   # needed to dispatch rebase-feat.yml after sync
+      contents: read   # all API calls use SYNC_TOKEN, not GITHUB_TOKEN
 
     steps:
       - name: Sync main with upstream/main
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN }}
         run: |
+          if [ -z "$GH_TOKEN" ]; then
+            {
+              echo "## ✗ SYNC_TOKEN secret is not configured"
+              echo
+              echo "Create a fine-grained PAT (Contents + Workflows read/write on"
+              echo "nag-codes/t3code) and save it as the SYNC_TOKEN repository secret:"
+              echo
+              echo '```bash'
+              echo 'gh secret set SYNC_TOKEN --repo nag-codes/t3code'
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::SYNC_TOKEN secret is not configured"
+            exit 1
+          fi
+
           set +e
           output=$(gh repo sync nag-codes/t3code --branch main 2>&1)
           status=$?
@@ -63,11 +78,3 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
             exit "$status"
           fi
-
-      - name: Trigger feat rebase
-        if: success()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh workflow run rebase-feat.yml --repo nag-codes/t3code --ref main
-          echo "Dispatched rebase-feat.yml — feat branch will be rebased onto the new main."
