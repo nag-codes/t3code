@@ -2,7 +2,7 @@
 
 # T3 Code environment doctor.
 # Verifies the toolchain expected by this repo:
-#   - Node version pinned in .mise.toml and package.json engines
+#   - Node version pinned for mise (mise.local.toml or any pin form) and package.json engines
 #   - pnpm (the repo's package manager, declared via package.json "packageManager")
 #   - mise, git
 #   - Provider CLIs (codex, claude) and their auth status
@@ -38,10 +38,30 @@ hdr "Bootstrap"
 if command -v mise >/dev/null 2>&1; then
   ok "mise installed ($(mise --version))"
 
-  if [[ -f ".mise.toml" ]]; then
-    info "trusting .mise.toml …"
-    if mise trust >/tmp/t3code-doctor-mise-trust.log 2>&1; then
-      ok "mise config trusted"
+  # Any of these counts as a project Node pin that the mise node shim can
+  # resolve. The global mise config deliberately has no node pin (each project
+  # self-governs), so with no project pin the shim resolves nothing and every
+  # node invocation fails: "mise ERROR No version is set for shim: node".
+  PIN_FILE=""
+  for f in mise.local.toml .mise.toml mise.toml .tool-versions .nvmrc; do
+    if [[ -f "$f" ]]; then PIN_FILE="$f"; break; fi
+  done
+
+  if [[ -z "$PIN_FILE" ]] && ! mise which node >/dev/null 2>&1; then
+    warn "mise node shim has no resolvable version and no project Node pin exists"
+    # Derive the pin from package.json engines.node (^24.13.1 -> 24.13.1).
+    NODE_PIN=$(grep -oE '"node"[[:space:]]*:[[:space:]]*"[^"]*"' package.json 2>/dev/null \
+      | head -1 | grep -oE '[0-9]+(\.[0-9]+)*' | head -1)
+    [[ -z "${NODE_PIN:-}" ]] && NODE_PIN="24"
+    info "writing mise.local.toml pinning node = ${NODE_PIN} — commit it so the fix travels with the repo"
+    printf '[tools]\nnode = "%s"\n' "$NODE_PIN" > mise.local.toml
+    PIN_FILE="mise.local.toml"
+  fi
+
+  if [[ -n "$PIN_FILE" ]]; then
+    info "trusting $PIN_FILE …"
+    if mise trust "$PIN_FILE" >/tmp/t3code-doctor-mise-trust.log 2>&1; then
+      ok "mise config trusted ($PIN_FILE)"
     else
       warn "mise trust failed — see /tmp/t3code-doctor-mise-trust.log"
     fi
@@ -52,15 +72,16 @@ if command -v mise >/dev/null 2>&1; then
     else
       fail "mise install failed — see /tmp/t3code-doctor-mise-install.log"
     fi
+  fi
 
-    # Use the mise-managed Node (per .mise.toml) for the rest of this run, so
-    # install + checks match upstream's pinned Node instead of whatever Node is
-    # first on PATH (e.g. a Homebrew install shadowing it in IntelliJ's shell).
-    if NODE_BIN=$(mise which node 2>/dev/null) && [[ -n "$NODE_BIN" ]]; then
-      export PATH="${NODE_BIN:h}:$PATH"
-    fi
+  # Use the mise-managed Node (per the project pin) for the rest of this run,
+  # so install + checks match the pinned Node instead of whatever Node is
+  # first on PATH (e.g. a Homebrew install shadowing it in IntelliJ's shell).
+  if NODE_BIN=$(mise which node 2>/dev/null) && [[ -n "$NODE_BIN" ]]; then
+    export PATH="${NODE_BIN:h}:$PATH"
+    ok "node resolves via mise ($("$NODE_BIN" --version 2>/dev/null))"
   else
-    warn "no .mise.toml at repo root"
+    warn "mise cannot resolve node — run: mise use node@${NODE_PIN:-24}"
   fi
 else
   warn "mise not found (optional; used to pin Node) — install from https://mise.jdx.dev"
@@ -89,7 +110,7 @@ if command -v node >/dev/null 2>&1; then
   if [[ "$NODE_V" == v${EXPECTED_NODE_MAJOR}.* ]]; then
     ok "node $NODE_V (expected v${EXPECTED_NODE_MAJOR}.x)"
   else
-    warn "node $NODE_V (expected v${EXPECTED_NODE_MAJOR}.x per .mise.toml)"
+    warn "node $NODE_V (expected v${EXPECTED_NODE_MAJOR}.x per the project Node pin)"
     print "         mise provides v${EXPECTED_NODE_MAJOR}.x; make sure this shell uses it (mise activate, or point IntelliJ at the mise shims)"
   fi
 else
