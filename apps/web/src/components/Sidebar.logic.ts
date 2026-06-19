@@ -12,6 +12,7 @@ import { isLatestTurnSettled } from "../session-logic";
 
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
 export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
+const NIGHTLY_SERVER_VERSION_PATTERN = /-nightly\.\d{8}\.\d+$/;
 // Visible sidebar rows are prewarmed into the thread-detail cache so opening a
 // nearby thread usually reuses an already-hot subscription.
 export const SIDEBAR_THREAD_PREWARM_LIMIT = 10;
@@ -62,6 +63,16 @@ type ThreadStatusInput = Pick<
 export interface ThreadJumpHintVisibilityController {
   sync: (shouldShow: boolean) => void;
   dispose: () => void;
+}
+
+export function resolveSidebarStageBadgeLabel(input: {
+  primaryServerVersion: string | null | undefined;
+  fallbackStageLabel: string;
+}): string {
+  return input.primaryServerVersion &&
+    NIGHTLY_SERVER_VERSION_PATTERN.test(input.primaryServerVersion)
+    ? "Nightly"
+    : input.fallbackStageLabel;
 }
 
 export function createThreadJumpHintVisibilityController(input: {
@@ -189,11 +200,13 @@ export function resolveSidebarNewThreadSeedContext(input: {
     branch: string | null;
     worktreePath: string | null;
     envMode: SidebarNewThreadEnvMode;
+    startFromOrigin: boolean;
   } | null;
 }): {
   branch?: string | null;
   worktreePath?: string | null;
   envMode: SidebarNewThreadEnvMode;
+  startFromOrigin?: boolean;
 } {
   if (input.defaultEnvMode === "worktree") {
     return {
@@ -206,6 +219,7 @@ export function resolveSidebarNewThreadSeedContext(input: {
       branch: input.activeDraftThread.branch,
       worktreePath: input.activeDraftThread.worktreePath,
       envMode: input.activeDraftThread.envMode,
+      startFromOrigin: input.activeDraftThread.startFromOrigin,
     };
   }
 

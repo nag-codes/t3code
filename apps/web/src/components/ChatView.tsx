@@ -111,12 +111,12 @@ import {
   useRightPanelStore,
 } from "../rightPanelStore";
 import {
-  applyPreviewServerSnapshot,
   isPreviewSupportedInRuntime,
-  removePreviewSession,
   setActivePreviewTab,
   useThreadPreviewState,
 } from "../previewStateStore";
+import { addBrowserSurface } from "./preview/addBrowserSurface";
+import { closePreviewSession } from "./preview/closePreviewSession";
 import { subscribePreviewAction } from "./preview/previewActionBus";
 import { getConfiguredPreviewUrls } from "./preview/previewEmptyStateLogic";
 import { PreviewAutomationOwner } from "./preview/PreviewAutomationOwner";
@@ -141,6 +141,7 @@ import { getProviderModelCapabilities, resolveSelectableProvider } from "../prov
 import { useSettings } from "../hooks/useSettings";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";
+import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
 import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,
@@ -1129,6 +1130,10 @@ function ChatViewContent(props: ChatViewProps) {
   const [pendingServerThreadEnvMode, setPendingServerThreadEnvMode] =
     useState<DraftThreadEnvMode | null>(null);
   const [pendingServerThreadBranch, setPendingServerThreadBranch] = useState<string | null>();
+  const [
+    pendingServerThreadStartFromOriginByThreadId,
+    setPendingServerThreadStartFromOriginByThreadId,
+  ] = useState<Record<string, boolean>>({});
   const [lastInvokedScriptByProjectId, setLastInvokedScriptByProjectId] = useLocalStorage(
     LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
     {},
@@ -2746,23 +2751,8 @@ function ChatViewContent(props: ChatViewProps) {
   }, [activeThreadRef, dismissPlanSidebarForCurrentTurn]);
   const createBrowserSurface = useCallback(() => {
     if (!activeThreadRef) return;
-    const activeTabId = activePreviewState.activeTabId;
-    if (activeTabId) {
-      useRightPanelStore.getState().openBrowser(activeThreadRef, activeTabId);
-      return;
-    }
-    void (async () => {
-      const result = await openPreview({
-        environmentId: activeThreadRef.environmentId,
-        input: { threadId: activeThreadRef.threadId },
-      });
-      if (result._tag === "Failure") {
-        return;
-      }
-      applyPreviewServerSnapshot(activeThreadRef, result.value);
-      useRightPanelStore.getState().openBrowser(activeThreadRef, result.value.tabId);
-    })();
-  }, [activePreviewState.activeTabId, activeThreadRef, openPreview]);
+    void addBrowserSurface({ threadRef: activeThreadRef, openPreview });
+  }, [activeThreadRef, openPreview]);
   const addDiffSurface = useCallback(() => {
     if (!activeThreadRef || !isServerThread || !isGitRepo) return;
     useRightPanelStore.getState().open(activeThreadRef, "diff");
@@ -2807,8 +2797,14 @@ function ChatViewContent(props: ChatViewProps) {
         search: (previous) => ({ ...stripDiffSearchParams(previous), diff: undefined }),
       });
     }
-    createBrowserSurface();
+    const activeTabId = activePreviewState.activeTabId;
+    if (activeTabId) {
+      useRightPanelStore.getState().openBrowser(activeThreadRef, activeTabId);
+    } else {
+      createBrowserSurface();
+    }
   }, [
+    activePreviewState.activeTabId,
     activeThreadRef,
     createBrowserSurface,
     diffOpen,
@@ -2993,10 +2989,11 @@ function ChatViewContent(props: ChatViewProps) {
 
       for (const surface of surfaces) {
         if (surface.kind === "preview" && surface.resourceId) {
-          removePreviewSession(activeThreadRef, surface.resourceId);
-          void closePreview({
-            environmentId: activeThreadRef.environmentId,
-            input: { threadId: activeThreadRef.threadId, tabId: surface.resourceId },
+          void closePreviewSession({
+            closePreview,
+            snapshot: activePreviewState.sessions[surface.resourceId] ?? null,
+            tabId: surface.resourceId,
+            threadRef: activeThreadRef,
           });
         }
         if (surface.kind === "terminal") {
@@ -3020,6 +3017,7 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [
       activeThreadRef,
+      activePreviewState.sessions,
       closePreview,
       closeTerminalMutation,
       diffOpen,
@@ -3337,6 +3335,12 @@ function ChatViewContent(props: ChatViewProps) {
     canOverrideServerThreadEnvMode && pendingServerThreadBranch !== undefined
       ? pendingServerThreadBranch
       : (activeThread?.branch ?? null);
+  const startFromOrigin = isLocalDraftThread
+    ? (draftThread?.startFromOrigin ?? false)
+    : canOverrideServerThreadEnvMode
+      ? (pendingServerThreadStartFromOriginByThreadId[activeThread?.id ?? ""] ??
+        settings.newWorktreesStartFromOrigin)
+      : false;
   const sendEnvMode = resolveSendEnvMode({
     requestedEnvMode: envMode,
     isGitRepo,
@@ -3899,6 +3903,7 @@ function ChatViewContent(props: ChatViewProps) {
                       projectCwd: activeProject.workspaceRoot,
                       baseBranch: baseBranchForWorktree,
                       branch: buildTemporaryWorktreeBranchName(randomHex),
+                      ...(startFromOrigin ? { startFromOrigin: true } : {}),
                     },
                     runSetupScript: true,
                   }
@@ -4584,6 +4589,10 @@ function ChatViewContent(props: ChatViewProps) {
       if (isLocalDraftThread) {
         setDraftThreadContext(composerDraftTarget, {
           envMode: mode,
+          startFromOrigin: resolveNewDraftStartFromOrigin({
+            envMode: mode,
+            newWorktreesStartFromOrigin: settings.newWorktreesStartFromOrigin,
+          }),
           ...(mode === "worktree" && draftThread?.worktreePath ? { worktreePath: null } : {}),
         });
       }
@@ -4594,11 +4603,28 @@ function ChatViewContent(props: ChatViewProps) {
       composerDraftTarget,
       draftThread?.worktreePath,
       isLocalDraftThread,
+      settings.newWorktreesStartFromOrigin,
       setPendingServerThreadEnvMode,
       scheduleComposerFocus,
       setDraftThreadContext,
     ],
   );
+
+  const onStartFromOriginChange = (nextStartFromOrigin: boolean) => {
+    if (canOverrideServerThreadEnvMode && activeThread) {
+      setPendingServerThreadStartFromOriginByThreadId((current) =>
+        current[activeThread.id] === nextStartFromOrigin
+          ? current
+          : { ...current, [activeThread.id]: nextStartFromOrigin },
+      );
+      return;
+    }
+    if (isLocalDraftThread) {
+      setDraftThreadContext(composerDraftTarget, {
+        startFromOrigin: nextStartFromOrigin,
+      });
+    }
+  };
 
   const onExpandTimelineImage = useCallback((preview: ExpandedImagePreview) => {
     setExpandedImage(preview);
@@ -4933,6 +4959,8 @@ function ChatViewContent(props: ChatViewProps) {
                   threadId={activeThread.id}
                   {...(routeKind === "draft" && draftId ? { draftId } : {})}
                   onEnvModeChange={onEnvModeChange}
+                  startFromOrigin={startFromOrigin}
+                  onStartFromOriginChange={onStartFromOriginChange}
                   {...(canOverrideServerThreadEnvMode ? { effectiveEnvModeOverride: envMode } : {})}
                   {...(canOverrideServerThreadEnvMode
                     ? {

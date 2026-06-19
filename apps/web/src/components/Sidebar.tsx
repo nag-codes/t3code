@@ -17,6 +17,7 @@ import {
   resolveThreadPr,
   terminalStatusFromRunningIds,
   ThreadStatusLabel,
+  ThreadWorktreeIndicator,
 } from "./ThreadStatusIndicators";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { useAtomValue } from "@effect/atom-react";
@@ -69,6 +70,7 @@ import {
 } from "@t3tools/contracts/settings";
 import { isElectron } from "../env";
 import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
+import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isMacPlatform } from "../lib/utils";
 import {
@@ -188,6 +190,7 @@ import {
   orderItemsByPreferredIds,
   shouldClearThreadSelectionOnMouseDown,
   sortProjectsForSidebar,
+  resolveSidebarStageBadgeLabel,
   useThreadJumpHintVisibility,
   ThreadStatusPill,
 } from "./Sidebar.logic";
@@ -197,7 +200,7 @@ import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { CommandDialogTrigger } from "./ui/command";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
-import { primaryServerKeybindingsAtom } from "../state/server";
+import { primaryServerConfigAtom, primaryServerKeybindingsAtom } from "../state/server";
 import {
   derivePhysicalProjectKey,
   deriveProjectGroupingOverrideKey,
@@ -741,6 +744,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               </TooltipPopup>
             </Tooltip>
           )}
+          <ThreadWorktreeIndicator thread={thread} />
           {terminalStatus && (
             <Tooltip>
               <TooltipTrigger
@@ -1155,29 +1159,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       );
     },
   });
-  const openPrLink = useCallback((event: React.MouseEvent<HTMLElement>, prUrl: string) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    const api = readLocalApi();
-    if (!api) {
-      toastManager.add({
-        type: "error",
-        title: "Link opening is unavailable.",
-      });
-      return;
-    }
-
-    void api.shell.openExternal(prUrl).catch((error) => {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Unable to open pull request link",
-          description: error instanceof Error ? error.message : "An error occurred.",
-        }),
-      );
-    });
-  }, []);
+  const openPrLink = useOpenPrLink();
   const sidebarThreads = useThreadShellsForProjectRefs(project.memberProjectRefs);
   const sidebarThreadByKey = useMemo(
     () =>
@@ -1875,6 +1857,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                 branch: currentActiveDraftThread.branch,
                 worktreePath: currentActiveDraftThread.worktreePath,
                 envMode: currentActiveDraftThread.envMode,
+                startFromOrigin: currentActiveDraftThread.startFromOrigin,
               }
             : null,
       });
@@ -1889,6 +1872,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               ? { worktreePath: seedContext.worktreePath }
               : {}),
             envMode: seedContext.envMode,
+            ...(seedContext.startFromOrigin !== undefined
+              ? { startFromOrigin: seedContext.startFromOrigin }
+              : {}),
           }),
         );
         if (result._tag === "Failure") {
@@ -2676,6 +2662,12 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
 }: {
   isElectron: boolean;
 }) {
+  const primaryServerVersion =
+    useAtomValue(primaryServerConfigAtom)?.environment.serverVersion ?? null;
+  const stageBadgeLabel = resolveSidebarStageBadgeLabel({
+    primaryServerVersion,
+    fallbackStageLabel: APP_STAGE_LABEL,
+  });
   const wordmark = (
     <div className="flex items-center gap-2">
       <SidebarTrigger className="shrink-0 md:hidden" />
@@ -2692,7 +2684,7 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
                 Code
               </span>
               <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
-                {APP_STAGE_LABEL}
+                {stageBadgeLabel}
               </span>
             </Link>
           }

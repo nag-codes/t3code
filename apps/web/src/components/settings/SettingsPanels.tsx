@@ -44,6 +44,7 @@ import {
   resolveAppModelSelectionState,
 } from "../../modelSelection";
 import {
+  applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
   sortProviderInstanceEntries,
 } from "../../providerInstances";
@@ -408,6 +409,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
         ? ["New thread mode"]
         : []),
+      ...(settings.newWorktreesStartFromOrigin !==
+      DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin
+        ? ["New worktrees start from origin"]
+        : []),
       ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
         ? ["Add project base directory"]
         : []),
@@ -426,6 +431,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.confirmThreadDelete,
       settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
+      settings.newWorktreesStartFromOrigin,
       settings.diffIgnoreWhitespace,
       settings.diffWordWrap,
       settings.automaticGitFetchInterval,
@@ -456,6 +462,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
       automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
       defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
+      newWorktreesStartFromOrigin: DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
@@ -489,7 +496,7 @@ export function GeneralSettingsPanel() {
   const textGenModel = textGenerationModelSelection.model;
   const textGenModelOptions = textGenerationModelSelection.options;
   const gitModelInstanceEntries = sortProviderInstanceEntries(
-    deriveProviderInstanceEntries(serverProviders),
+    applyProviderInstanceSettings(deriveProviderInstanceEntries(serverProviders), settings),
   );
   const textGenInstanceEntry = gitModelInstanceEntries.find(
     (entry) => entry.instanceId === textGenInstanceId,
@@ -663,6 +670,33 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
+          title="Provider update checks"
+          description="Check installed provider CLIs for newer available versions."
+          resetAction={
+            settings.enableProviderUpdateChecks !==
+            DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks ? (
+              <SettingResetButton
+                label="provider update checks"
+                onClick={() =>
+                  updateSettings({
+                    enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.enableProviderUpdateChecks}
+              onCheckedChange={(checked) =>
+                updateSettings({ enableProviderUpdateChecks: Boolean(checked) })
+              }
+              aria-label="Check provider versions"
+            />
+          }
+        />
+
+        <SettingsRow
           title="Auto-open task panel"
           description="Open the right-side plan and task panel automatically when steps appear."
           resetAction={
@@ -692,12 +726,16 @@ export function GeneralSettingsPanel() {
           title="New threads"
           description="Pick the default workspace mode for newly created draft threads."
           resetAction={
-            settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode ? (
+            settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode ||
+            settings.newWorktreesStartFromOrigin !==
+              DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin ? (
               <SettingResetButton
                 label="new threads"
                 onClick={() =>
                   updateSettings({
                     defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
+                    newWorktreesStartFromOrigin:
+                      DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
                   })
                 }
               />
@@ -728,6 +766,37 @@ export function GeneralSettingsPanel() {
             </Select>
           }
         />
+
+        {settings.defaultThreadEnvMode === "worktree" ? (
+          <SettingsRow
+            className="bg-muted/20 sm:pl-9"
+            title="Start from origin"
+            description="Creates the worktree from the latest matching branch on origin instead of your local branch."
+            resetAction={
+              settings.newWorktreesStartFromOrigin !==
+              DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin ? (
+                <SettingResetButton
+                  label="new worktrees start from origin"
+                  onClick={() =>
+                    updateSettings({
+                      newWorktreesStartFromOrigin:
+                        DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.newWorktreesStartFromOrigin}
+                onCheckedChange={(checked) =>
+                  updateSettings({ newWorktreesStartFromOrigin: Boolean(checked) })
+                }
+                aria-label="Start new worktrees from origin by default"
+              />
+            }
+          />
+        ) : null}
 
         <SettingsRow
           title="Add project starts in"

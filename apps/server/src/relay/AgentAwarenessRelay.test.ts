@@ -64,9 +64,10 @@ function makeMemorySecretStore() {
   const values = new Map<string, Uint8Array>();
   const store = {
     get: ((name) =>
-      Effect.sync(
-        () => values.get(name) ?? null,
-      )) satisfies ServerSecretStore.ServerSecretStoreShape["get"],
+      Effect.sync(() => {
+        const value = values.get(name);
+        return value === undefined ? Option.none() : Option.some(Uint8Array.from(value));
+      })) satisfies ServerSecretStore.ServerSecretStoreShape["get"],
     set: ((name, value) =>
       Effect.sync(() => {
         values.set(name, Uint8Array.from(value));
@@ -625,7 +626,11 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
         } satisfies ExecutionEnvironmentDescriptor;
 
         globalThis.fetch = ((input: Parameters<typeof fetch>[0]) => {
-          const url = new URL(input instanceof Request ? input.url : input.toString());
+          const url = new URL(
+            typeof input === "string" || input instanceof URL
+              ? input
+              : (input as unknown as { readonly url: string }).url,
+          );
           runFork(Deferred.succeed(fetchSeen, url));
           return Promise.resolve(Response.json({ ok: true, deliveries: [] }));
         }) as unknown as typeof fetch;
