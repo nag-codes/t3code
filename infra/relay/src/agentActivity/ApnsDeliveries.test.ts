@@ -141,19 +141,19 @@ function makeLayer(input: {
   readonly sourceJobClaims?: ReadonlyMap<string, DeliveryAttempts.DeliverySourceJobClaimResult>;
   readonly queuedJobs?: Array<SignedApnsDeliveryJob>;
   readonly queuedStarts?: Array<
-    Parameters<LiveActivities.LiveActivitiesShape["markStartQueued"]>[0]
+    Parameters<LiveActivities.LiveActivities["Service"]["markStartQueued"]>[0]
   >;
   readonly clearedStarts?: Array<
-    Parameters<LiveActivities.LiveActivitiesShape["clearStartQueued"]>[0]
+    Parameters<LiveActivities.LiveActivities["Service"]["clearStartQueued"]>[0]
   >;
   readonly markedDeliveries?: Array<
-    Parameters<LiveActivities.LiveActivitiesShape["markDelivery"]>[0]
+    Parameters<LiveActivities.LiveActivities["Service"]["markDelivery"]>[0]
   >;
   readonly invalidatedTokens?: Array<
-    Parameters<LiveActivities.LiveActivitiesShape["invalidateDeliveryToken"]>[0]
+    Parameters<LiveActivities.LiveActivities["Service"]["invalidateDeliveryToken"]>[0]
   >;
   readonly currentTargets?: ReadonlyArray<LiveActivities.TargetRow>;
-  readonly config?: RelayConfiguration.RelayConfigurationShape;
+  readonly config?: RelayConfiguration.RelayConfiguration["Service"];
   readonly execute?: (
     request: HttpClientRequest.HttpClientRequest,
   ) => Effect.Effect<HttpClientResponse.HttpClientResponse>;
@@ -213,7 +213,7 @@ function makeLayer(input: {
               input.invalidatedTokens?.push(invalidated);
             }),
         }),
-        Layer.succeed(RelayConfiguration.RelayConfiguration, input.config ?? config),
+        RelayConfiguration.layer(input.config ?? config),
         input.execute
           ? Layer.succeed(HttpClient.HttpClient, HttpClient.make(input.execute))
           : FetchHttpClient.layer,
@@ -227,10 +227,10 @@ describe("ApnsDeliveries", () => {
     const attempts: Array<DeliveryAttempts.DeliveryAttemptInput> = [];
     const queuedJobs: Array<SignedApnsDeliveryJob> = [];
     const queuedStarts: Array<
-      Parameters<LiveActivities.LiveActivitiesShape["markStartQueued"]>[0]
+      Parameters<LiveActivities.LiveActivities["Service"]["markStartQueued"]>[0]
     > = [];
     const markedDeliveries: Array<
-      Parameters<LiveActivities.LiveActivitiesShape["markDelivery"]>[0]
+      Parameters<LiveActivities.LiveActivities["Service"]["markDelivery"]>[0]
     > = [];
 
     return Effect.gen(function* () {
@@ -611,6 +611,22 @@ describe("ApnsDeliveries", () => {
     }).pipe(Effect.provide(makeLayer({ attempts, queuedJobs })));
   });
 
+  it.effect("preserves the schema cause for invalid queue payloads", () => {
+    const attempts: Array<DeliveryAttempts.DeliveryAttemptInput> = [];
+
+    return Effect.gen(function* () {
+      const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+      const error = yield* Effect.flip(deliveries.processSignedJob({ invalid: true }));
+
+      expect(error).toMatchObject({
+        _tag: "ApnsDeliveryJobQueuePayloadInvalid",
+        receivedType: "object",
+        message: "Invalid APNs delivery queue job with object payload.",
+      });
+      expect(error.cause).toMatchObject({ _tag: "SchemaError" });
+    }).pipe(Effect.provide(makeLayer({ attempts })));
+  });
+
   it.effect("processes signed jobs through APNs and records attempts", () => {
     const attempts: Array<DeliveryAttempts.DeliveryAttemptInput> = [];
     const payload = makeApnsDeliveryJobPayload({
@@ -933,7 +949,7 @@ describe("ApnsDeliveries", () => {
   it.effect("invalidates dead device push tokens after permanent APNs alert failures", () => {
     const attempts: Array<DeliveryAttempts.DeliveryAttemptInput> = [];
     const invalidatedTokens: Array<
-      Parameters<LiveActivities.LiveActivitiesShape["invalidateDeliveryToken"]>[0]
+      Parameters<LiveActivities.LiveActivities["Service"]["invalidateDeliveryToken"]>[0]
     > = [];
     const payload = makeApnsDeliveryJobPayload({
       kind: "push_notification",
@@ -1000,7 +1016,7 @@ describe("ApnsDeliveries", () => {
   it.effect("clears queued start state when a start job fails in APNs", () => {
     const attempts: Array<DeliveryAttempts.DeliveryAttemptInput> = [];
     const clearedStarts: Array<
-      Parameters<LiveActivities.LiveActivitiesShape["clearStartQueued"]>[0]
+      Parameters<LiveActivities.LiveActivities["Service"]["clearStartQueued"]>[0]
     > = [];
     const payload = makeApnsDeliveryJobPayload({
       kind: "live_activity_start",
@@ -1035,7 +1051,7 @@ describe("ApnsDeliveries", () => {
   it.effect("invalidates dead push-to-start tokens after permanent APNs start failures", () => {
     const attempts: Array<DeliveryAttempts.DeliveryAttemptInput> = [];
     const invalidatedTokens: Array<
-      Parameters<LiveActivities.LiveActivitiesShape["invalidateDeliveryToken"]>[0]
+      Parameters<LiveActivities.LiveActivities["Service"]["invalidateDeliveryToken"]>[0]
     > = [];
     const payload = makeApnsDeliveryJobPayload({
       kind: "live_activity_start",
@@ -1082,7 +1098,7 @@ describe("ApnsDeliveries", () => {
   it.effect("invalidates dead Live Activity tokens after APNs unregisters them", () => {
     const attempts: Array<DeliveryAttempts.DeliveryAttemptInput> = [];
     const invalidatedTokens: Array<
-      Parameters<LiveActivities.LiveActivitiesShape["invalidateDeliveryToken"]>[0]
+      Parameters<LiveActivities.LiveActivities["Service"]["invalidateDeliveryToken"]>[0]
     > = [];
     const payload = makeApnsDeliveryJobPayload({
       kind: "live_activity_update",
