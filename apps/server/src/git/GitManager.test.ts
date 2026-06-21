@@ -171,20 +171,8 @@ function runGitSyncForFakeGh(cwd: string, args: readonly string[]): void {
   if (result.status === 0) {
     return;
   }
-  throw new GitHubCli.GitHubCliError({
-    operation: "execute",
-    command: "gh",
-    cwd,
-    detail: `Failed to simulate gh checkout with git ${args.join(" ")}: ${result.stderr?.trim() || "unknown error"}`,
-  });
-}
-
-function isGitHubCliError(error: unknown): error is GitHubCli.GitHubCliError {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "_tag" in error &&
-    (error as { _tag?: unknown })._tag === "GitHubCliError"
+  throw new Error(
+    `Failed to simulate gh checkout with git ${args.join(" ")}: ${result.stderr?.trim() || "unknown error"}`,
   );
 }
 
@@ -478,16 +466,12 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
           return fakeGhOutput("");
         },
         catch: (error) =>
-          isGitHubCliError(error)
+          GitHubCli.isGitHubCliError(error)
             ? error
-            : new GitHubCli.GitHubCliError({
-                operation: "execute",
+            : new GitHubCli.GitHubCliCommandError({
                 command: "gh",
                 cwd: input.cwd,
-                detail:
-                  error instanceof Error
-                    ? `Failed to simulate gh checkout: ${error.message}`
-                    : "Failed to simulate gh checkout.",
+                cause: error,
               }),
       });
     }
@@ -498,11 +482,10 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
         const cloneUrls = scenario.repositoryCloneUrls?.[repository];
         if (!cloneUrls) {
           return Effect.fail(
-            new GitHubCli.GitHubCliError({
-              operation: "execute",
+            new GitHubCli.GitHubCliCommandError({
               command: "gh",
               cwd: input.cwd,
-              detail: `Unexpected repository lookup: ${repository}`,
+              cause: new Error(`Unexpected repository lookup: ${repository}`),
             }),
           );
         }
@@ -520,11 +503,10 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
     }
 
     return Effect.fail(
-      new GitHubCli.GitHubCliError({
-        operation: "execute",
+      new GitHubCli.GitHubCliCommandError({
         command: "gh",
         cwd: input.cwd,
-        detail: `Unexpected gh command: ${args.join(" ")}`,
+        cause: new Error(`Unexpected gh command: ${args.join(" ")}`),
       }),
     );
   };
@@ -601,11 +583,10 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
         }).pipe(Effect.map((result) => JSON.parse(result.stdout))),
       createRepository: (input) =>
         Effect.fail(
-          new GitHubCli.GitHubCliError({
-            operation: "createRepository",
+          new GitHubCli.GitHubCliCommandError({
             command: "gh",
             cwd: input.cwd,
-            detail: `Unexpected repository create: ${input.repository}`,
+            cause: new Error(`Unexpected repository create: ${input.repository}`),
           }),
         ),
       checkoutPullRequest: (input) =>
@@ -1341,11 +1322,10 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
       const { manager } = yield* makeManager({
         ghScenario: {
-          failWith: new GitHubCli.GitHubCliError({
-            operation: "execute",
+          failWith: new GitHubCli.GitHubCliUnavailableError({
             command: "gh",
             cwd: repoDir,
-            detail: "GitHub CLI (`gh`) is required but not available on PATH.",
+            cause: new Error("gh is not available on PATH"),
           }),
         },
       });
@@ -2483,11 +2463,10 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
       const { manager } = yield* makeManager({
         ghScenario: {
-          failWith: new GitHubCli.GitHubCliError({
-            operation: "execute",
+          failWith: new GitHubCli.GitHubCliUnavailableError({
             command: "gh",
             cwd: repoDir,
-            detail: "GitHub CLI (`gh`) is required but not available on PATH.",
+            cause: new Error("gh is not available on PATH"),
           }),
         },
       });
@@ -2514,11 +2493,10 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
       const { manager } = yield* makeManager({
         ghScenario: {
-          failWith: new GitHubCli.GitHubCliError({
-            operation: "execute",
+          failWith: new GitHubCli.GitHubCliAuthenticationError({
             command: "gh",
             cwd: repoDir,
-            detail: "GitHub CLI is not authenticated. Run `gh auth login` and retry.",
+            cause: new Error("gh is not authenticated"),
           }),
         },
       });
@@ -2754,6 +2732,65 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         "--show-current",
       ])).stdout.trim();
       expect(worktreeBranch).toBe("feature/pr-worktree");
+    }),
+  );
+
+  it.effect("preserves both branch materialization failures when the fallback also fails", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const originDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", originDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+
+      const missingForkDir = NodePath.join(repoDir, "missing-fork.git");
+      const { manager } = yield* makeManager({
+        ghScenario: {
+          pullRequest: {
+            number: 93,
+            title: "Missing fork branch",
+            url: "https://github.com/pingdotgg/codething-mvp/pull/93",
+            baseRefName: "main",
+            headRefName: "feature/missing-fork-branch",
+            state: "open",
+            isCrossRepository: true,
+            headRepositoryNameWithOwner: "octocat/codething-mvp",
+            headRepositoryOwnerLogin: "octocat",
+          },
+          repositoryCloneUrls: {
+            "octocat/codething-mvp": {
+              url: missingForkDir,
+              sshUrl: missingForkDir,
+            },
+          },
+        },
+      });
+
+      const error = yield* preparePullRequestThread(manager, {
+        cwd: repoDir,
+        reference: "93",
+        mode: "worktree",
+      }).pipe(Effect.flip);
+
+      if (error._tag !== "GitPullRequestMaterializationError") {
+        return yield* Effect.die(error);
+      }
+      expect(error).toMatchObject({
+        cwd: repoDir,
+        pullRequestNumber: 93,
+        headRepository: "octocat/codething-mvp",
+        headBranch: "feature/missing-fork-branch",
+        localBranch: "t3code/pr-93/feature/missing-fork-branch",
+      });
+      if (!(error.cause instanceof AggregateError)) {
+        return yield* Effect.die(error.cause);
+      }
+      expect(error.cause.errors).toHaveLength(2);
+      expect(error.cause.errors).toEqual([
+        expect.objectContaining({ _tag: "GitCommandError" }),
+        expect.objectContaining({ _tag: "GitCommandError" }),
+      ]);
+      expect(error.cause.cause).toBe(error.cause.errors[0]);
     }),
   );
 
